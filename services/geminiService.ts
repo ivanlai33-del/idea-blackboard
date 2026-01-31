@@ -3,7 +3,8 @@ import { GoogleGenAI } from "@google/genai";
 import { LinkData, Note, Category, ExportMode, GeneratedRecord, Persona } from "../types";
 
 // Initialize Gemini API client
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const apiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
+const ai = new GoogleGenAI({ apiKey });
 
 const EXPORT_SYSTEM_INSTRUCTION = `You are the AI engine inside a web app called “Idea Blackboard AI”.
 This app is a workflow-oriented whiteboard for individuals and small teams to turn messy ideas into clear actions, reports, and presentations.
