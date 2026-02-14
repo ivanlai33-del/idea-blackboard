@@ -1,52 +1,34 @@
 
 import React, { useState } from 'react';
-import { Note, Category, ExportMode, GeneratedRecord, Persona } from '../types';
+import { Paper, Category, Board, GeneratedRecord, PaperType } from '../types';
 import { generateBoardReport, parseGeneratedContent } from '../services/geminiService';
-import { X, FileText, Check, Copy, Presentation, ListTodo, ClipboardList, Coffee, History, ArrowLeft, Trash2, Calendar, Sparkles, ChevronRight, User } from 'lucide-react';
+import { X, FileText, Check, Copy, Presentation, ListTodo, ClipboardList, Coffee, History, ArrowLeft, Trash2, Calendar, Sparkles, ChevronRight } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface ExportModalProps {
     isOpen: boolean;
     onClose: () => void;
     categories: Category[];
-    notes: Note[];
+    notes: Paper[];
     records: GeneratedRecord[];
     onSaveRecord: (record: GeneratedRecord) => void;
     onDeleteRecord: (id: string) => void;
-    activePersona?: Persona; // Added activePersona
+    activeBoard?: Board;
 }
 
+type ExportMode = 'meeting' | 'slides' | 'todo' | 'reflection';
 type ModalView = 'menu' | 'config' | 'loading' | 'result';
 
-const MODES: { id: ExportMode; label: string; icon: React.ReactNode; desc: string }[] = [
-    {
-        id: 'meeting_minutes',
-        label: '會議報告',
-        icon: <ClipboardList className="w-5 h-5" />,
-        desc: '結構化會議紀要與行動清單'
-    },
-    {
-        id: 'proposal_slides',
-        label: '簡報大綱',
-        icon: <Presentation className="w-5 h-5" />,
-        desc: '產出 PPT / Keynote 簡報架構'
-    },
-    {
-        id: 'task_list',
-        label: '待辦清單',
-        icon: <ListTodo className="w-5 h-5" />,
-        desc: '提取待辦事項與執行計畫'
-    },
-    {
-        id: 'daily_summary',
-        label: '個人反思',
-        icon: <Coffee className="w-5 h-5" />,
-        desc: '彙整今日洞察與明日建議'
-    },
+const MODES: { id: ExportMode; label: string; icon: any; desc: string }[] = [
+    { id: 'meeting', label: '會議報告', icon: ClipboardList, desc: '結構化會議紀要與行動清單' },
+    { id: 'slides', label: '簡報大綱', icon: Presentation, desc: '產出 PPT / Keynote 簡報架構' },
+    { id: 'todo', label: '待辦清單', icon: ListTodo, desc: '提取待辦事項與執行計畫' },
+    { id: 'reflection', label: '個人反思', icon: Coffee, desc: '彙整今日洞察與明日建議' },
 ];
 
-const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, categories, notes, records, onSaveRecord, onDeleteRecord, activePersona }) => {
+const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, categories, notes, records, onSaveRecord, onDeleteRecord, activeBoard }) => {
     const [currentView, setCurrentView] = useState<ModalView>('menu');
-    const [selectedMode, setSelectedMode] = useState<ExportMode>('meeting_minutes');
+    const [selectedMode, setSelectedMode] = useState<ExportMode>('meeting');
     const [selectedCats, setSelectedCats] = useState<Set<string>>(new Set(categories.map(c => c.id)));
     const [viewRecord, setViewRecord] = useState<GeneratedRecord | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -68,11 +50,8 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, categories, 
 
     const toggleCategory = (id: string) => {
         const next = new Set(selectedCats);
-        if (next.has(id)) {
-            next.delete(id);
-        } else {
-            next.add(id);
-        }
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
         setSelectedCats(next);
     };
 
@@ -85,12 +64,13 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, categories, 
         setError(null);
 
         try {
-            const rawText = await generateBoardReport(notes, categories, selectedMode, Array.from(selectedCats), activePersona);
+            // Refine the prompt context based on active board
+            const contextType = activeBoard?.name || '專案';
+            const rawText = await generateBoardReport(notes as any, categories, selectedMode as any, Array.from(selectedCats), activeBoard as any);
 
-            // Parse and save automatically
-            const parsed = parseGeneratedContent(rawText, selectedMode);
+            const parsed = parseGeneratedContent(rawText, selectedMode as any);
             const newRecord: GeneratedRecord = {
-                id: Date.now().toString(),
+                id: `report-${Date.now()}`,
                 ...parsed
             };
 
@@ -98,7 +78,8 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, categories, 
             setViewRecord(newRecord);
             setCurrentView('result');
         } catch (err) {
-            setError("生成失敗，請稍後再試。");
+            console.error(err);
+            setError("生成失敗，請檢查網路或 API KEY。");
             setCurrentView('config');
         }
     };
@@ -111,306 +92,192 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, categories, 
         }
     };
 
-    const handleDeleteCurrent = () => {
-        if (viewRecord) {
-            if (confirm("確定要刪除此份報告嗎？")) {
-                onDeleteRecord(viewRecord.id);
-                setCurrentView('menu');
-            }
-        }
-    }
-
-    const formatDate = (iso: string) => {
-        return new Date(iso).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
-    };
-
     return (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-[#F2F4F7]/90 backdrop-blur-md" onClick={handleClose} />
-
-            <div className="card-item w-full max-w-2xl max-h-[85vh] flex flex-col !bg-white shadow-2xl relative animate-modal-in overflow-hidden !p-0 border border-[#D1D8E0]">
-
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-300">
+            <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="w-full max-w-2xl bg-white rounded-[32px] shadow-2xl overflow-hidden border border-white/50 flex flex-col max-h-[90vh]"
+            >
                 {/* Header */}
-                <div className="px-5 py-4 border-b border-[#D1D8E0] flex justify-between items-center bg-white/80 backdrop-blur-sm z-10">
+                <div className="p-6 border-b border-[var(--border-light)] flex items-center justify-between bg-white relative z-10">
                     <div className="flex items-center gap-3">
                         {currentView !== 'menu' && (
-                            <button onClick={() => setCurrentView('menu')} title="返回" className="text-[#636E72] hover:text-[#2D3436] mr-1 p-1 hover:bg-gray-100 rounded-lg transition-colors">
-                                <ArrowLeft className="w-5 h-5" />
+                            <button onClick={() => setCurrentView('menu')} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
+                                <ArrowLeft className="w-5 h-5 text-gray-500" />
                             </button>
                         )}
-                        <div className="flex items-center gap-2">
-                            {currentView === 'loading' ? (
-                                <Sparkles className="w-5 h-5 text-[#00af80] animate-pulse" />
-                            ) : (
-                                <div className="w-8 h-8 rounded-lg bg-[#00af80]/10 flex items-center justify-center text-[#00af80]">
-                                    <Sparkles className="w-4 h-4" />
-                                </div>
-                            )}
-                            <h2 className="text-base font-bold text-[#2D3436]">智能助手</h2>
-                        </div>
+                        <h3 className="text-xl font-bold text-[var(--text-main)] flex items-center gap-3">
+                            <img src="/Lumos_logo.svg" className="w-6 h-6 object-contain" alt="" />
+                            智能助手
+                        </h3>
                     </div>
-
-                    <div className="flex items-center gap-3">
-                        {/* Primary Action Button placed in Header */}
-                        {currentView === 'config' && (
-                            <button
-                                onClick={handleGenerate}
-                                className="flex items-center gap-2 px-4 py-2 bg-[#00af80] text-white rounded-lg font-bold text-xs hover:bg-[#009f75] transition-all shadow-md hover:shadow-lg transform hover:-translate-y-0.5 active:translate-y-0"
-                            >
-                                <Sparkles className="w-3.5 h-3.5" />
-                                開始生成
-                            </button>
-                        )}
-
-                        <div className="w-px h-5 bg-[#D1D8E0] mx-1"></div>
-
-                        <button onClick={handleClose} title="關閉" className="text-[#636E72] hover:text-[#2D3436] p-1 rounded-lg hover:bg-gray-100 transition-colors">
-                            <X className="w-5 h-5" />
-                        </button>
-                    </div>
+                    <button onClick={handleClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                        <X className="w-6 h-6 text-gray-400" />
+                    </button>
                 </div>
 
-                {/* Content Area */}
-                <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#FAFAFA] relative">
-
-                    {/* VIEW: MENU */}
-                    {currentView === 'menu' && (
-                        <div className="p-6 sm:p-8 flex flex-col gap-6 h-full">
-                            {/* Main CTA */}
-                            <button
-                                onClick={() => setCurrentView('config')}
-                                className="w-full bg-white p-6 rounded-2xl border border-[#D1D8E0] hover:border-[#00af80] shadow-sm hover:shadow-md transition-all group text-left relative overflow-hidden"
+                <div className="flex-1 overflow-y-auto custom-scrollbar bg-gray-50/30">
+                    <AnimatePresence mode="wait">
+                        {currentView === 'menu' && (
+                            <motion.div
+                                key="menu"
+                                initial={{ opacity: 0, x: -20 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                exit={{ opacity: 0, x: -20 }}
+                                className="p-6 space-y-6"
                             >
-                                <div className="absolute right-0 top-0 w-32 h-32 bg-[#00af80]/5 rounded-full blur-3xl -mr-10 -mt-10 group-hover:bg-[#00af80]/10 transition-colors"></div>
-
-                                <div className="flex items-start gap-4 relative z-10">
-                                    <div className="w-12 h-12 rounded-xl bg-[#00af80] flex items-center justify-center shrink-0 shadow-lg group-hover:scale-110 transition-transform duration-300">
-                                        <Sparkles className="w-6 h-6 text-white" />
+                                <button
+                                    onClick={() => setCurrentView('config')}
+                                    className="w-full bg-white p-6 rounded-3xl border border-[var(--border-light)] hover:border-[var(--primary)] shadow-sm hover:shadow-xl transition-all group text-left flex items-center gap-6"
+                                >
+                                    <div className="w-16 h-16 rounded-2xl bg-white border border-gray-100 flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
+                                        <img src="/logo.svg" className="w-10 h-10 object-contain" alt="" />
                                     </div>
                                     <div className="flex-1">
-                                        <h3 className="text-lg font-bold text-[#2D3436] mb-1 group-hover:text-[#00af80] transition-colors">建立新報告</h3>
-                                        <p className="text-sm text-[#636E72]">透過 AI 整理白板上的點子，快速生成會議紀要或簡報架構。</p>
+                                        <h4 className="text-lg font-bold text-[var(--text-main)] mb-1">建立新報告</h4>
+                                        <p className="text-sm text-gray-400">分析當前白板內容，自動生成專業文件</p>
                                     </div>
-                                    <ChevronRight className="w-5 h-5 text-[#D1D8E0] group-hover:text-[#00af80] transition-colors self-center" />
-                                </div>
-                            </button>
+                                    <ChevronRight className="w-6 h-6 text-gray-300" />
+                                </button>
 
-                            {/* History Section */}
-                            <div className="flex flex-col flex-1 min-h-0 bg-white rounded-2xl border border-[#D1D8E0] shadow-sm overflow-hidden">
-                                <div className="p-4 border-b border-[#D1D8E0] bg-[#FAFAFA]/50 flex items-center justify-between">
-                                    <div className="flex items-center gap-2">
-                                        <History className="w-4 h-4 text-[#636E72]" />
-                                        <span className="text-xs font-bold text-[#636E72] uppercase tracking-wider">歷史紀錄</span>
-                                    </div>
-                                    <span className="text-[10px] bg-[#F2F4F7] px-2 py-0.5 rounded-full text-[#636E72] font-mono">{records.length}</span>
-                                </div>
-
-                                <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
+                                <div className="space-y-3">
+                                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">報告歷史</label>
                                     {records.length === 0 ? (
-                                        <div className="h-40 flex flex-col items-center justify-center text-[#636E72]/40 gap-3">
-                                            <div className="w-12 h-12 rounded-full bg-[#F2F4F7] flex items-center justify-center">
-                                                <History className="w-5 h-5" />
-                                            </div>
-                                            <span className="text-xs font-medium">尚無生成紀錄</span>
+                                        <div className="h-40 flex flex-col items-center justify-center border-2 border-dashed border-gray-100 rounded-3xl text-gray-300">
+                                            <History className="w-8 h-8 mb-2 opacity-20" />
+                                            <span className="text-xs font-bold">尚無歷史紀錄</span>
                                         </div>
                                     ) : (
-                                        records.map(r => (
-                                            <button
-                                                key={r.id}
-                                                onClick={() => {
-                                                    setViewRecord(r);
-                                                    setCurrentView('result');
-                                                }}
-                                                className="w-full text-left p-3 rounded-xl hover:bg-[#F2F4F7] border border-transparent hover:border-[#D1D8E0] transition-all group"
-                                            >
-                                                <div className="flex justify-between items-start mb-1.5">
-                                                    <span className="text-sm font-bold text-[#2D3436] line-clamp-1 group-hover:text-[#00af80] transition-colors">{r.title}</span>
-                                                    <span className="text-[10px] text-[#b2b2b2] whitespace-nowrap font-mono pt-0.5">{formatDate(r.generatedAt)}</span>
-                                                </div>
-                                                <div className="flex items-center gap-2">
-                                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-white border border-[#D1D8E0] text-[#636E72] group-hover:border-[#00af80]/30 transition-colors">
-                                                        {MODES.find(m => m.id === r.exportMode)?.label || r.contextType}
-                                                    </span>
-                                                </div>
-                                            </button>
-                                        ))
+                                        <div className="grid grid-cols-1 gap-2">
+                                            {records.map(r => (
+                                                <button
+                                                    key={r.id}
+                                                    onClick={() => { setViewRecord(r); setCurrentView('result'); }}
+                                                    className="p-4 bg-white border border-[var(--border-light)] rounded-2xl flex items-center justify-between hover:bg-gray-50 transition-colors group"
+                                                >
+                                                    <div className="flex items-center gap-3">
+                                                        <FileText className="w-4 h-4 text-gray-400 group-hover:text-[var(--primary)]" />
+                                                        <span className="text-sm font-bold text-gray-600 line-clamp-1">{r.title}</span>
+                                                    </div>
+                                                    <span className="text-[10px] text-gray-400 font-mono">{new Date(r.generatedAt).toLocaleDateString()}</span>
+                                                </button>
+                                            ))}
+                                        </div>
                                     )}
                                 </div>
-                            </div>
-                        </div>
-                    )}
+                            </motion.div>
+                        )}
 
-                    {/* VIEW: CONFIG */}
-                    {currentView === 'config' && (
-                        <div className="p-6 sm:p-8 space-y-8 max-w-2xl mx-auto">
-                            {/* Section 1 */}
-                            <div className="space-y-3">
-                                <h3 className="text-xs font-bold text-[#636E72] uppercase tracking-wider flex items-center gap-2">
-                                    <span className="w-5 h-5 rounded-full bg-[#2D3436] text-white flex items-center justify-center text-[10px]">1</span>
-                                    選擇格式
-                                </h3>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                    {MODES.map(mode => (
-                                        <button
-                                            key={mode.id}
-                                            onClick={() => setSelectedMode(mode.id)}
-                                            className={`
-                                                relative p-4 rounded-xl border text-left transition-all duration-200 group
-                                                ${selectedMode === mode.id
-                                                    ? 'bg-white border-[#00af80] shadow-[0_0_0_2px_rgba(0,175,128,0.1)]'
-                                                    : 'bg-white border-[#D1D8E0] hover:border-[#636E72] hover:bg-gray-50'
-                                                }
-                                            `}
-                                        >
-                                            <div className="flex items-start gap-3">
-                                                <div className={`
-                                                    w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors
-                                                    ${selectedMode === mode.id ? 'bg-[#00af80]/10 text-[#00af80]' : 'bg-[#F2F4F7] text-[#636E72] group-hover:bg-[#2D3436]/5'}
-                                                `}>
-                                                    {mode.icon}
-                                                </div>
-                                                <div>
-                                                    <div className={`font-bold text-sm mb-0.5 ${selectedMode === mode.id ? 'text-[#00af80]' : 'text-[#2D3436]'}`}>
-                                                        {mode.label}
-                                                    </div>
-                                                    <div className="text-[11px] text-[#636E72] leading-tight">
-                                                        {mode.desc}
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            {selectedMode === mode.id && (
-                                                <div className="absolute top-3 right-3 text-[#00af80]">
-                                                    <Check className="w-4 h-4" />
-                                                </div>
-                                            )}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {/* Section 2 */}
-                            <div className="space-y-3">
-                                <h3 className="text-xs font-bold text-[#636E72] uppercase tracking-wider flex items-center gap-2">
-                                    <span className="w-5 h-5 rounded-full bg-[#2D3436] text-white flex items-center justify-center text-[10px]">2</span>
-                                    匯出範圍
-                                </h3>
-
-                                {activePersona && (
-                                    <div className="flex items-center gap-2 p-3 bg-[var(--primary)]/5 rounded-xl border border-[var(--primary)]/20 mb-4 animate-in fade-in slide-in-from-top-2">
-                                        <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center text-lg">{activePersona.icon}</div>
-                                        <div className="flex-1">
-                                            <p className="text-[10px] uppercase tracking-widest text-[var(--primary)] font-bold">當前身份裝備</p>
-                                            <p className="text-xs font-bold text-[var(--text-main)] italic">「{activePersona.name}」模式 - AI 將對應此角色生成專業內容</p>
-                                        </div>
-                                    </div>
-                                )}
-
-                                <div className="bg-white border border-[#D1D8E0] rounded-xl overflow-hidden shadow-sm">
-                                    <div className="grid grid-cols-2 divide-x divide-[#F2F4F7]">
-                                        {categories.map((cat, idx) => (
-                                            <label
-                                                key={cat.id}
+                        {currentView === 'config' && (
+                            <motion.div
+                                key="config"
+                                initial={{ opacity: 0, x: 20 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                exit={{ opacity: 0, x: 20 }}
+                                className="p-6 space-y-8"
+                            >
+                                <div className="space-y-4">
+                                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">1. 選擇報告類型</label>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        {MODES.map(m => (
+                                            <button
+                                                key={m.id}
+                                                onClick={() => setSelectedMode(m.id)}
                                                 className={`
-                                                    flex items-center gap-3 p-3 cursor-pointer hover:bg-[#F8F9FA] transition-colors
-                                                    ${idx >= 2 ? 'border-t border-[#F2F4F7]' : ''} 
-                                                    ${selectedCats.has(cat.id) ? 'bg-[#00af80]/5' : ''}
+                                                    p-4 rounded-2xl border text-left transition-all
+                                                    ${selectedMode === m.id ? 'bg-white border-[var(--primary)] shadow-lg' : 'bg-gray-50 border-transparent hover:bg-white hover:border-gray-200'}
                                                 `}
                                             >
-                                                <div className="relative flex items-center justify-center">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={selectedCats.has(cat.id)}
-                                                        onChange={() => toggleCategory(cat.id)}
-                                                        className="peer appearance-none w-5 h-5 border-2 border-[#D1D8E0] rounded checked:bg-[#00af80] checked:border-[#00af80] transition-all cursor-pointer"
-                                                    />
-                                                    <Check className="w-3 h-3 text-white absolute opacity-0 peer-checked:opacity-100 pointer-events-none transition-opacity" strokeWidth={3} />
-                                                </div>
-
-                                                <div className="flex items-center gap-2 min-w-0">
-                                                    <span className="text-lg">{cat.icon}</span>
-                                                    <span className={`text-sm font-medium truncate ${selectedCats.has(cat.id) ? 'text-[#2D3436]' : 'text-[#636E72]'}`}>
-                                                        {cat.title}
-                                                    </span>
-                                                </div>
-                                            </label>
+                                                <m.icon className={`w-5 h-5 mb-2 ${selectedMode === m.id ? 'text-[var(--primary)]' : 'text-gray-400'}`} />
+                                                <h5 className={`text-sm font-bold ${selectedMode === m.id ? 'text-[var(--text-main)]' : 'text-gray-500'}`}>{m.label}</h5>
+                                                <p className="text-[10px] text-gray-400 leading-tight mt-1">{m.desc}</p>
+                                            </button>
                                         ))}
                                     </div>
                                 </div>
-                                {error && (
-                                    <div className="flex items-center gap-2 text-xs text-red-500 font-bold bg-red-50 p-3 rounded-lg border border-red-100 animate-modal-in">
-                                        <div className="w-1.5 h-1.5 rounded-full bg-red-500"></div>
-                                        {error}
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    )}
 
-                    {/* VIEW: LOADING */}
-                    {currentView === 'loading' && (
-                        <div className="flex flex-col items-center justify-center h-full p-10 text-center gap-8">
-                            <div className="relative">
-                                <div className="w-20 h-20 border-4 border-[#F2F4F7] border-t-[#00af80] rounded-full animate-spin"></div>
-                                <div className="absolute inset-0 flex items-center justify-center">
-                                    <Sparkles className="w-8 h-8 text-[#00af80]" />
-                                </div>
-                            </div>
-                            <div className="max-w-xs space-y-2">
-                                <h3 className="text-lg font-bold text-[#2D3436]">正在分析白板內容...</h3>
-                                <p className="text-sm text-[#636E72] leading-relaxed">
-                                    AI 正在閱讀您的點子並進行結構化整理，報告將自動儲存。
-                                </p>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* VIEW: RESULT */}
-                    {currentView === 'result' && viewRecord && (
-                        <div className="flex flex-col h-full bg-white">
-                            {/* Meta Info Bar */}
-                            <div className="bg-[#FAFAFA] px-6 py-3 border-b border-[#D1D8E0] flex flex-wrap gap-4 items-center text-xs text-[#636E72]">
-                                <div className="flex items-center gap-1.5">
-                                    <Calendar className="w-3.5 h-3.5" />
-                                    <span className="font-mono">{formatDate(viewRecord.generatedAt)}</span>
-                                </div>
-                                <div className="h-4 w-px bg-[#D1D8E0]"></div>
-                                <span className="font-bold text-[#2D3436]">{viewRecord.title}</span>
-                                <div className="ml-auto flex items-center gap-2">
-                                    <button
-                                        onClick={handleCopy}
-                                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all border shadow-sm
-                                            ${copySuccess
-                                                ? 'bg-green-50 text-green-600 border-green-200'
-                                                : 'bg-white border-[#D1D8E0] text-[#636E72] hover:text-[#2D3436] hover:bg-gray-50'
-                                            }
-                                        `}
-                                    >
-                                        {copySuccess ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                                        {copySuccess ? '已複製' : '複製內容'}
-                                    </button>
-                                    <button
-                                        onClick={handleDeleteCurrent}
-                                        className="p-1.5 text-[#636E72] hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                                        title="刪除"
-                                    >
-                                        <Trash2 className="w-4 h-4" />
-                                    </button>
-                                </div>
-                            </div>
-
-                            {/* Content */}
-                            <div className="flex-1 overflow-y-auto custom-scrollbar p-8 bg-white">
-                                <div className="max-w-3xl mx-auto">
-                                    <div className="prose prose-sm max-w-none prose-headings:font-bold prose-headings:text-[#2D3436] prose-p:text-[#4a5568] prose-li:text-[#4a5568] prose-strong:text-[#2D3436]">
-                                        <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">{viewRecord.content}</pre>
+                                <div className="space-y-4">
+                                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">2. 選擇分析範圍</label>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        {categories.map(cat => (
+                                            <button
+                                                key={cat.id}
+                                                onClick={() => toggleCategory(cat.id)}
+                                                className={`
+                                                    flex items-center gap-3 p-3 rounded-xl border transition-all text-sm font-bold
+                                                    ${selectedCats.has(cat.id) ? 'bg-white border-[var(--primary)] shadow-sm' : 'bg-gray-50 border-transparent text-gray-400'}
+                                                `}
+                                            >
+                                                <div className={`w-4 h-4 rounded-md border-2 flex items-center justify-center ${selectedCats.has(cat.id) ? 'bg-[var(--primary)] border-[var(--primary)]' : 'border-gray-300'}`}>
+                                                    {selectedCats.has(cat.id) && <Check className="w-3 h-3 text-white" />}
+                                                </div>
+                                                {cat.title}
+                                            </button>
+                                        ))}
                                     </div>
                                 </div>
-                            </div>
-                        </div>
-                    )}
+
+                                <button
+                                    onClick={handleGenerate}
+                                    className="w-full py-4 bg-gradient-to-r from-cyan-400 to-teal-600 text-white rounded-[24px] font-bold shadow-xl hover:brightness-110 hover:shadow-2xl hover:-translate-y-0.5 transition-all flex items-center justify-center gap-2 text-lg active:scale-95"
+                                >
+                                    <img src="/logo.svg" className="w-6 h-6 object-contain brightness-0 invert" alt="" />
+                                    產生智能報告
+                                </button>
+                            </motion.div>
+                        )}
+
+                        {currentView === 'loading' && (
+                            <motion.div
+                                key="loading"
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                className="h-96 flex flex-col items-center justify-center text-center p-10 gap-6"
+                            >
+                                <div className="relative">
+                                    <div className="w-24 h-24 border-4 border-gray-100 border-t-[var(--primary)] rounded-full animate-spin"></div>
+                                    <img src="/logo.svg" className="absolute inset-x-0 inset-y-0 m-auto w-10 h-10 object-contain animate-pulse" alt="" />
+                                </div>
+                                <div className="space-y-2">
+                                    <h4 className="text-xl font-bold text-[var(--text-main)]">正在彙整您的思緒...</h4>
+                                    <p className="text-sm text-gray-400 max-w-xs">AI 正在讀取這 {notes.length} 張紙片中的數據並進行結構化分析。</p>
+                                </div>
+                            </motion.div>
+                        )}
+
+                        {currentView === 'result' && viewRecord && (
+                            <motion.div
+                                key="result"
+                                initial={{ opacity: 0, scale: 0.98 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                className="flex flex-col h-full overflow-hidden"
+                            >
+                                <div className="p-4 bg-gray-50 border-b border-[var(--border-light)] flex items-center justify-between">
+                                    <div className="flex items-center gap-2 text-xs font-bold text-gray-400">
+                                        <Calendar className="w-3.5 h-3.5" />
+                                        {new Date(viewRecord.generatedAt).toLocaleString()}
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button onClick={handleCopy} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${copySuccess ? 'bg-green-500 text-white' : 'bg-white text-[var(--primary)] border border-[var(--primary)] hover:bg-[var(--primary)]/5'}`}>
+                                            {copySuccess ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                                            {copySuccess ? '已複製' : '複製內容'}
+                                        </button>
+                                        <button onClick={() => { onDeleteRecord(viewRecord.id); setCurrentView('menu'); }} className="p-2 text-gray-300 hover:text-red-500 transition-colors">
+                                            <Trash2 className="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="p-8 overflow-y-auto custom-scrollbar flex-1 bg-white">
+                                    <div className="prose prose-sm max-w-none">
+                                        <pre className="whitespace-pre-wrap font-sans text-base leading-relaxed text-gray-700 bg-transparent border-none p-0">{viewRecord.content}</pre>
+                                    </div>
+                                </div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
                 </div>
-            </div>
+            </motion.div>
         </div>
     );
 };

@@ -1,72 +1,87 @@
 
-export interface LinkData {
-    url: string;
-    title: string;
-    description: string;
-    image?: string;
-    siteName?: string;
-}
-
-export type PersonaType = 'Student' | 'Teacher' | 'Housewife' | 'Employee' | 'Boss' | 'Accountant' | 'Doctor' | 'Designer' | 'Custom';
-
 export type SubscriptionTier = 'Free' | 'Pro' | 'Team';
+export type Lang = 'zh' | 'en';
 
 export interface User {
     id: string;
     email: string;
-    name?: string;
+    name: string;
     avatar?: string;
     tier: SubscriptionTier;
     provider: 'Google' | 'Line' | 'Email';
 }
 
-export interface Persona {
+// Basic Board structure (formerly Persona)
+export interface Board {
     id: string;
-    userId?: string; // Link to the owner
-    type: PersonaType;
     name: string;
-    icon: string;
-    context: string; // The system prompt or background info for AI
+    icon: string; // Greyscale/Simple icons
     color: string;
+    persona?: string; // Links to PERSONA_MAGIC_TOOLS
+    isTemplate?: boolean;
 }
 
-export interface UserProfile {
-    id: string;
-    email: string;
-    personas: Persona[];
-    activePersonaId: string;
-}
+// Global Paper (formerly Note)
+export type PaperType = 'text' | 'image' | 'link' | 'file' | 'stock' | 'utility';
 
-export interface Note {
+export interface Paper {
     id: string;
-    categoryId: string;
+    boardId: string;
+    columnId: string;
+    type: PaperType;
     text: string;
+    contentUrl?: string; // For images/files/link previews
     time: number;
     pinned: boolean;
-    archived?: boolean;
-    linkData?: LinkData;
-    personaId?: string; // Link note to a specific persona
+    isStored: boolean; // Managed by Storage Box
+    archivedAt?: number;
+    fullBackground?: boolean; // New: Use image as card background
+    modules?: PaperModule[]; // Optional modular components for 'utility' type
+}
+
+export interface PaperModule {
+    id: string;
+    type: 'checklist' | 'counter' | 'progress' | 'label-value';
+    title: string;
+    config?: any;
+    data?: any;
 }
 
 export interface Category {
     id: string;
+    boardId: string;
     title: string;
     color: string;
     icon?: string;
-    personaId: string; // Linking category/column to a specific persona
+    avatar?: string; // Custom avatar for column
+    isStored?: boolean;
+    archivedAt?: number;
+}
+
+export interface AIReport {
+    id: string;
+    title: string;
+    type: 'meeting' | 'slides' | 'todo' | 'reflection';
+    content: string;
+    createdAt: number;
+    isStored: boolean;
+}
+
+export interface LinkData {
+    url: string;
+    title: string;
+    description: string;
+    siteName: string;
+    image: string;
 }
 
 export interface GeneratedRecord {
     id: string;
     title: string;
-    exportMode: ExportMode;
+    exportMode: string;
     contextType: string;
     scopeSummary: string;
-    generatedAt: string; // ISO string
-    content: string; // The full raw content or body
-    rawOutput: string; // The complete original response including headers
+    generatedAt: string;
+    content: string;
+    rawOutput: string;
 }
-
-export type ViewMode = 'board' | 'grid';
-
-export type ExportMode = 'meeting_minutes' | 'proposal_slides' | 'task_list' | 'daily_summary';

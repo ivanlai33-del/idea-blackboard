@@ -1,12 +1,140 @@
 
-import { GoogleGenAI } from "@google/genai";
-import { LinkData, Note, Category, ExportMode, GeneratedRecord, Persona } from "../types";
+import { LinkData, Paper, Category, GeneratedRecord } from "../types";
 
-// Initialize Gemini API client
-const apiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
-const ai = new GoogleGenAI({ apiKey });
+type Note = Paper;
+export type ExportMode = string;
 
-const EXPORT_SYSTEM_INSTRUCTION = `You are the AI engine inside a web app called “Idea Blackboard AI”.
+export interface Persona {
+    name: string;
+    context: string;
+    type?: string;
+}
+
+const getApiKey = (): string => {
+    // Priority: Local Storage > Environment Variable
+    const storedKey = localStorage.getItem("gemini_api_key");
+    if (storedKey) return storedKey;
+
+    try {
+        // @ts-ignore - Vite environment variable access
+        return import.meta.env?.VITE_GEMINI_API_KEY || "";
+    } catch {
+        return "";
+    }
+};
+
+// Generic Fetch Helper for Gemini API
+// Using REST API avoids SDK compatibility issues in browser and ensures simple HTTP requests
+const callGeminiApi = async (
+    prompt: string,
+    systemInstruction?: string,
+    tools?: any[],
+    jsonMode: boolean = false
+): Promise<string> => {
+    console.log("[GeminiService] Starting API call...");
+    const apiKey = getApiKey();
+    if (!apiKey) throw new Error("未偵測到 API Key。");
+
+    // Default optimistic list
+    const defaults = ["gemini-1.5-flash", "gemini-1.5-flash-latest"];
+    let errors: string[] = [];
+
+    // Helper to perform the actual fetch
+    const fetchGeneration = async (modelName: string) => {
+        // Strip 'models/' prefix if present for clean URL construction
+        const cleanName = modelName.replace('models/', '');
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanName}:generateContent?key=${apiKey}`;
+
+        const body: any = {
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.7 }
+        };
+        if (systemInstruction) body.systemInstruction = { parts: [{ text: systemInstruction }] };
+        if (tools) body.tools = tools;
+        if (jsonMode) body.generationConfig.responseMimeType = "application/json";
+
+        const res = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+        });
+
+        if (!res.ok) {
+            const txt = await res.text();
+            throw new Error(`HTTP ${res.status}: ${txt}`);
+        }
+
+        const data = await res.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!text) throw new Error("Empty response");
+        return text;
+    };
+
+    // 1. Try defaults first
+    for (const model of defaults) {
+        try {
+            console.log(`[GeminiService] Trying default: ${model}`);
+            const result = await fetchGeneration(model);
+            console.log(`[GeminiService] SUCCESS using default model: ${model}`);
+            return result;
+        } catch (e: any) {
+            console.warn(`[GeminiService] ${model} failed: ${e.message}`);
+            errors.push(`${model}: ${e.message}`);
+
+            // If Key is invalid, stop immediately
+            if (e.message.includes("400") && e.message.includes("API key")) throw e;
+            if (e.message.includes("403")) throw e;
+        }
+    }
+
+    // 2. If defaults failed with 404, perform Dynamic Discovery
+    // Only try this if the previous errors were actually 404s (Not Found)
+    if (errors.some(e => e.includes("404"))) {
+        console.log("[GeminiService] Defaults failed (404). Fetching available models...");
+        try {
+            const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
+            const listRes = await fetch(listUrl);
+
+            if (!listRes.ok) {
+                const listErr = await listRes.text();
+                throw new Error(`ListModels failed: ${listErr}`);
+            }
+
+            const listData = await listRes.json();
+            const availableModels = listData.models || [];
+
+            // Find first model that supports 'generateContent'
+            const validModel = availableModels.find((m: any) =>
+                m.supportedGenerationMethods?.includes("generateContent")
+            );
+
+            if (validModel) {
+                console.log(`[GeminiService] Discovered valid model: ${validModel.name}`);
+                // validModel.name includes 'models/', fetchGeneration handles it
+                const result = await fetchGeneration(validModel.name);
+                console.log(`[GeminiService] SUCCESS using discovered model: ${validModel.name}`);
+                return result;
+            } else {
+                throw new Error("No models with 'generateContent' capability found for this Key.");
+            }
+
+        } catch (discoveryError: any) {
+            console.error("[GeminiService] Discovery failed:", discoveryError);
+            errors.push(`Discovery: ${discoveryError.message}`);
+        }
+    }
+
+    // Capture explicit failure
+    const errorMsg = errors.join(" | ");
+    console.error("All attempts failed:", errorMsg);
+
+    // Throw simplified error for specific known cases, or full log for debugging
+    if (errorMsg.includes("404")) throw new Error(`找不到可用模型 (404)。您的 API Key 可能未啟用 Generative AI API，或權限受限。\n細節: ${errorMsg}`);
+
+    throw new Error(`AI 連線失敗: ${errorMsg}`);
+};
+
+const EXPORT_SYSTEM_INSTRUCTION = `You are the AI engine inside a web app called “Lumos AI”.
 This app is a workflow-oriented whiteboard for individuals and small teams to turn messy ideas into clear actions, reports, and presentations.
 You act as a behind-the-scenes assistant that整理、總結與結構化使用者的白板內容，並幫忙產生「可被收納與搜尋」的輸出資訊（例如標題、時間、分類）。
 
@@ -40,18 +168,39 @@ If input is mostly Traditional Chinese, output Traditional Chinese. Otherwise En
 Only use cards inside the provided scope. If scope is empty, generate the headers and a "No content" message.
 `;
 
+// Helper for UI components to call AI directly (e.g. PaperDetailModal)
+export const generateAiResponse = async (prompt: string, systemInstruction?: string): Promise<string> => {
+    return await callGeminiApi(prompt, systemInstruction);
+};
+
+// AI Image Generation
+export const generateAiImage = async (prompt: string): Promise<string> => {
+    console.log(`[GeminiService] Generating image for prompt: ${prompt}`);
+
+    // Simulating delay
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // Return a variety of high-quality abstract images to simulate re-generation
+    const randomSeed = Math.floor(Math.random() * 1000);
+    const abstractPool = [
+        '1620641788421-7a1c342ea42e',
+        '1579546929518-9e396f3cc809',
+        '1550684848-fac1c5b4e853',
+        '1541701494587-cb58502866ab',
+        '1494438639946-1ebd1d20bf85'
+    ];
+    const poolId = abstractPool[randomSeed % abstractPool.length];
+
+    return `https://images.unsplash.com/photo-${poolId}?q=80&w=1000&auto=format&fit=crop&sig=${randomSeed}`;
+};
+
 export const expandIdeaWithAI = async (content: string, persona?: Persona): Promise<string> => {
     const personaContext = persona ? `\n當前身份背景：${persona.name} (${persona.context})。請站在這個身份的角度提供建議。` : "";
     const prompt = `你是一個創意教練。請針對以下點子，提供 3 個進一步擴展或落實的具體思路：\n"${content}"${personaContext}\n請用精簡且有啟發性的繁體中文回答。`;
 
     try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: prompt,
-        });
-        return response.text || "無法生成建議。";
+        return await callGeminiApi(prompt);
     } catch (error) {
-        console.error("AI Generation Error:", error);
         throw new Error("AI 服務暫時無法使用，請稍後再試。");
     }
 };
@@ -67,18 +216,19 @@ export const getLinkPreview = async (url: string): Promise<LinkData> => {
     如果這是一個 YouTube 影片，請提供影片標題與描述。`;
 
     try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: prompt,
-            config: {
-                tools: [{ googleSearch: {} }],
-                responseMimeType: "application/json"
-            }
-        });
+        // Use Google Search tool if possible, or just standard generation
+        // Note: Google Search tool via REST API requires specific structure. 
+        // For simplicity and robustness, we first try standard generation which often works for well-known URLs or relies on internal knowledge.
+        // To use tools via REST: "tools": [{ "google_search": {} }]
+        // Use standard generation without tools for stability
+        const jsonText = await callGeminiApi(
+            prompt,
+            undefined,
+            undefined,
+            true // JSON mode
+        );
 
-        const jsonText = response.text || "{}";
         const data = JSON.parse(jsonText);
-
         const image = `https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=${encodeURIComponent(url)}&size=128`;
 
         return {
@@ -105,9 +255,9 @@ export const generateBoardReport = async (
     categories: Category[],
     mode: ExportMode,
     selectedCategoryIds: string[],
-    activePersona?: Persona // Added persona awareness
+    activePersona?: Persona
 ): Promise<string> => {
-    const activeNotes = notes.filter(n => !n.archived && selectedCategoryIds.includes(n.categoryId)); // Fixed category -> categoryId
+    const activeNotes = notes.filter(n => !n.isStored && selectedCategoryIds.includes(n.columnId));
     const activeCategories = categories.filter(c => selectedCategoryIds.includes(c.id));
 
     let instructionMode = mode as string;
@@ -120,11 +270,11 @@ export const generateBoardReport = async (
         current_datetime: new Date().toISOString(),
         persona: activePersona ? {
             name: activePersona.name,
-            type: activePersona.type,
-            background: activePersona.context
+            type: (activePersona as any).type || "Board",
+            background: (activePersona as any).context || "Lumos Project Board"
         } : null,
         scope: {
-            project_name: activePersona ? `${activePersona.name} 的點子看板` : "IdeaFlow Workspace",
+            project_name: activePersona ? activePersona.name : "Lumos Workspace",
             boards: [
                 {
                     board_id: "main_board",
@@ -133,7 +283,7 @@ export const generateBoardReport = async (
                         column_id: cat.id,
                         column_name: cat.title,
                         cards: activeNotes
-                            .filter(n => n.categoryId === cat.id) // Fixed: category -> categoryId
+                            .filter(n => n.columnId === cat.id)
                             .map(n => ({
                                 card_id: n.id,
                                 title: n.text.split('\n')[0].substring(0, 50),
@@ -150,16 +300,8 @@ export const generateBoardReport = async (
     };
 
     try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: JSON.stringify(inputPayload),
-            config: {
-                systemInstruction: EXPORT_SYSTEM_INSTRUCTION
-            }
-        });
-        return response.text || "生成失敗，請稍後再試。";
+        return await callGeminiApi(JSON.stringify(inputPayload), EXPORT_SYSTEM_INSTRUCTION);
     } catch (error) {
-        console.error("Export Generation Error:", error);
         throw new Error("AI 服務暫時無法使用，請稍後再試。");
     }
 };
@@ -196,4 +338,31 @@ export const parseGeneratedContent = (rawText: string, mode: ExportMode): Omit<G
         content: bodyContent.length > 0 ? bodyContent : rawText, // Fallback if parse fails
         rawOutput: rawText
     };
+};
+
+export const generateInsightReport = async (logs: { user: string, ai: string, timestamp: string }[]): Promise<string> => {
+    if (logs.length === 0) return "目前尚無對話紀錄可供分析。";
+
+    // Convert logs to a readable string format
+    const logsText = logs.map((log, index) =>
+        `[${index + 1}] User: ${log.user}\nAI: ${log.ai}`
+    ).join("\n\n");
+
+    const systemPrompt = `
+    你現在是 Lumos AI 的「客戶洞察專家」。
+    你的任務是分析以下的使用者與客服機器人的對話紀錄，並產出一份「客戶洞察報告」。
+    
+    請包含以下部分：
+    1. **熱門詢問主題**：使用者最常問什麼？（例如：價格、特定功能、教學...）
+    2. **使用者痛點/需求**：他們遇到了什麼問題？或是想要什麼功能？
+    3. **銷售機會分析**：哪些使用者展現了高度購買意願？
+    4. **話術優化建議**：AI 的回答有哪些地方可以改進，以提高轉換率？
+
+    請用專業、條理分明的繁體中文格式輸出 Markdown 報告。
+    `;
+
+    return await callGeminiApi(
+        `以下是最近的對話紀錄：\n\n${logsText}\n\n請根據上述內容生成客戶洞察報告。`,
+        systemPrompt
+    );
 };
